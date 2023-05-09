@@ -1,0 +1,119 @@
+#include <WiFi.h>
+#include <Preferences.h>
+#include <WiFiClient.h>
+#include <WiFiServer.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+
+// Access Point configuration
+const char* apSSID = "ESP32-AP";
+const char* apPassword = "password";
+
+// Wi-Fi configuration
+const char* ssid = "";
+const char* password = "";
+
+// AsyncWebServer configuration
+AsyncWebServer server(80);
+
+// WiFiServer configuration
+WiFiServer wifiServer(8080);
+
+// Preferences object to store Wi-Fi credentials
+Preferences preferences;
+
+bool isConfigMode = false;
+
+void enterConfigMode() {
+  Serial.println("Entering configuration mode...");
+
+  // Set ESP32 to Access Point mode
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(apSSID, apPassword);
+  Serial.print("Access Point SSID: ");
+  Serial.println(apSSID);
+
+  // Start the AsyncWebServer
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", "<form method='POST' action='/connect'><label>SSID: <input type='text' name='ssid'></label><br><label>Password: <input type='password' name='password'></label><br><input type='submit' value='Connect'></form><br><form method='GET' action='/skip'><input type='submit' value='Skip Wi-Fi Configuration'></form>");
+  });
+
+  // Handle GET request to skip Wi-Fi configuration
+  server.on("/skip", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", "Skipping Wi-Fi configuration...");
+    delay(1000);
+    ESP.restart();
+  });
+
+  // Start the WiFiServer
+  wifiServer.begin();
+}
+
+void connectToWiFi() {
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to Wi-Fi...");
+  }
+
+  Serial.println("Connected to Wi-Fi.");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println();
+
+  // Initialize Preferences
+  preferences.begin("wifi", false);
+
+  // Check if Wi-Fi credentials are stored in Preferences
+  ssid = preferences.getString("ssid", "").c_str();
+  password = preferences.getString("password", "").c_str();
+
+  // If Wi-Fi credentials are not stored, enter configuration mode
+  if (strcmp(ssid, "") == 0 || strcmp(password, "") == 0) {
+    enterConfigMode();
+  } 
+  // If Wi-Fi credentials are stored, connect to Wi-Fi
+  else {
+    connectToWiFi();
+  }
+
+  // Handle GET request to retrieve data from WiFiServer
+  wifiServer.on("/data", []() {
+    String message = "Hello from WiFiServer!";
+    wifiServer.send(200, "text/plain", message);
+  });
+
+  // Handle GET request to retrieve data from AsyncWebServer
+  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){
+    String message = "Hello from AsyncWebServer!";
+    request->send(200, "text/plain", message);
+  });
+
+  // Start the AsyncWebServer
+  server.begin();
+}
+
+void loop() {
+  // Handle incoming connections to WiFiServer
+  WiFiClient wifiClient = wifiServer.available();
+  if (wifiClient) {
+    Serial.println("New client connected to WiFiServer.");
+    wifiClient.println("Hello from WiFiServer!");
+    wifiClient.stop();
+  }
+
+  // Handle incoming connections to AsyncWebServer
+  server.handleClient();
+
+  // If Wi-Fi connection is lost, enter configuration mode
+  if (WiFi.status() != WL_CONNECTED) {
+    enterConfigMode();
+  }
+}
